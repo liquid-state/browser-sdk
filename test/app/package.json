@@ -2,7 +2,9 @@
   "name": "app",
   "version": "0.0.0",
   "scripts": {
-    "postinstall": "webpack --mode=production"
+    "build": "webpack --mode=production",
+    "compat:tsc": "tsc -p tsconfig.json",
+    "compat:ssr": "webpack --mode=development && node dist/app.js"
   },
   "dependencies": {
     "@datadog/browser-logs": "file:../../packages/logs",
@@ -13,7 +15,7 @@
   },
   "devDependencies": {
     "ts-loader": "6.2.1",
-    "typescript": "3.7.2",
+    "typescript": "3.0.1",
     "webpack": "4.41.2"
   }
 }

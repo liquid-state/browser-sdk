@@ -1,8 +1,11 @@
-import { addMonitoringMessage, Configuration, includes, msToNs, ResourceKind, startsWith } from '@datadog/browser-core'
+import { addMonitoringMessage, Configuration, includes, msToNs, ResourceKind } from '@datadog/browser-core'
 
 import { PerformanceResourceDetails } from './rum'
 
+export const FAKE_INITIAL_DOCUMENT = 'initial_document'
+
 const RESOURCE_TYPES: Array<[ResourceKind, (initiatorType: string, path: string) => boolean]> = [
+  [ResourceKind.DOCUMENT, (initiatorType: string) => FAKE_INITIAL_DOCUMENT === initiatorType],
   [ResourceKind.XHR, (initiatorType: string) => 'xmlhttprequest' === initiatorType],
   [ResourceKind.FETCH, (initiatorType: string) => 'fetch' === initiatorType],
   [ResourceKind.BEACON, (initiatorType: string) => 'beacon' === initiatorType],
@@ -39,32 +42,38 @@ export function computeResourceKind(timing: PerformanceResourceTiming) {
   return ResourceKind.OTHER
 }
 
+function formatTiming(start: number, end: number) {
+  return { duration: msToNs(end - start), start: msToNs(start) }
+}
+
+function isValidTiming(start: number, end: number) {
+  return start >= 0 && end >= 0 && end >= start
+}
+
 export function computePerformanceResourceDetails(
   entry?: PerformanceResourceTiming
 ): PerformanceResourceDetails | undefined {
-  if (entry && hasTimingAllowedAttributes(entry)) {
-    return {
-      connect: { duration: msToNs(entry.connectEnd - entry.connectStart), start: msToNs(entry.connectStart) },
-      dns: {
-        duration: msToNs(entry.domainLookupEnd - entry.domainLookupStart),
-        start: msToNs(entry.domainLookupStart),
-      },
-      download: { duration: msToNs(entry.responseEnd - entry.responseStart), start: msToNs(entry.responseStart) },
-      firstByte: { duration: msToNs(entry.responseStart - entry.requestStart), start: msToNs(entry.requestStart) },
-      redirect:
-        entry.redirectStart > 0
-          ? { duration: msToNs(entry.redirectEnd - entry.redirectStart), start: msToNs(entry.redirectStart) }
-          : undefined,
-      ssl:
-        entry.secureConnectionStart > 0
-          ? {
-              duration: msToNs(entry.connectEnd - entry.secureConnectionStart),
-              start: msToNs(entry.secureConnectionStart),
-            }
-          : undefined,
-    }
+  if (!entry || !hasTimingAllowedAttributes(entry)) {
+    return undefined
   }
-  return undefined
+  if (
+    !isValidTiming(entry.connectStart, entry.connectEnd) ||
+    !isValidTiming(entry.domainLookupStart, entry.domainLookupEnd) ||
+    !isValidTiming(entry.responseStart, entry.responseEnd) ||
+    !isValidTiming(entry.requestStart, entry.responseStart) ||
+    !isValidTiming(entry.redirectStart, entry.redirectEnd) ||
+    !isValidTiming(entry.secureConnectionStart, entry.connectEnd)
+  ) {
+    return undefined
+  }
+  return {
+    connect: formatTiming(entry.connectStart, entry.connectEnd),
+    dns: formatTiming(entry.domainLookupStart, entry.domainLookupEnd),
+    download: formatTiming(entry.responseStart, entry.responseEnd),
+    firstByte: formatTiming(entry.requestStart, entry.responseStart),
+    redirect: entry.redirectStart !== 0 ? formatTiming(entry.redirectStart, entry.redirectEnd) : undefined,
+    ssl: entry.secureConnectionStart !== 0 ? formatTiming(entry.secureConnectionStart, entry.connectEnd) : undefined,
+  }
 }
 
 export function computeSize(entry?: PerformanceResourceTiming) {
@@ -81,9 +90,13 @@ export function isValidResource(url: string, configuration: Configuration) {
 
 function isBrowserAgentRequest(url: string, configuration: Configuration) {
   return (
-    startsWith(url, configuration.logsEndpoint) ||
-    startsWith(url, configuration.rumEndpoint) ||
-    startsWith(url, configuration.traceEndpoint) ||
-    (configuration.internalMonitoringEndpoint && startsWith(url, configuration.internalMonitoringEndpoint))
+    haveSameOrigin(url, configuration.logsEndpoint) ||
+    haveSameOrigin(url, configuration.rumEndpoint) ||
+    haveSameOrigin(url, configuration.traceEndpoint) ||
+    (configuration.internalMonitoringEndpoint && haveSameOrigin(url, configuration.internalMonitoringEndpoint))
   )
+}
+
+function haveSameOrigin(url1: string, url2: string) {
+  return new URL(url1).origin === new URL(url2).origin
 }

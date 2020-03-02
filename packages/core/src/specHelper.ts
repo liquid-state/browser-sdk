@@ -1,6 +1,14 @@
+import { Configuration } from './configuration'
 import { Observable } from './observable'
 import { RequestDetails } from './requestCollection'
 import { noop } from './utils'
+
+export const SPEC_ENDPOINTS: Partial<Configuration> = {
+  internalMonitoringEndpoint: 'https://monitoring-intake.com/abcde?foo=bar',
+  logsEndpoint: 'https://logs-intake.com/abcde?foo=bar',
+  rumEndpoint: 'https://rum-intake.com/abcde?foo=bar',
+  traceEndpoint: 'https://trace-intake.com/abcde?foo=bar',
+}
 
 export function isSafari() {
   return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
@@ -55,7 +63,14 @@ export class FetchStubBuilder {
         resolve({
           ...response,
           clone: () => {
-            const cloned = { text: async () => response.responseText }
+            const cloned = {
+              text: async () => {
+                if (response.responseTextError) {
+                  throw response.responseTextError
+                }
+                return response.responseText
+              },
+            }
             return cloned as Response
           },
         }) as Promise<ResponseStub>
@@ -67,6 +82,7 @@ export class FetchStubBuilder {
 
 export interface ResponseStub extends Partial<Response> {
   responseText?: string
+  responseTextError?: Error
 }
 
 export type FetchStub = (input: RequestInfo, init?: RequestInit) => FetchStubPromise

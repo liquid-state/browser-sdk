@@ -33,21 +33,26 @@ export interface BuildEnv {
 
 export function commonInit(userConfiguration: UserConfiguration, buildEnv: BuildEnv) {
   const configuration = buildConfiguration(userConfiguration, buildEnv)
-  startInternalMonitoring(configuration)
+  const internalMonitoring = startInternalMonitoring(configuration)
   const errorObservable = startErrorCollection(configuration)
 
   return {
     configuration,
     errorObservable,
+    internalMonitoring,
   }
 }
 
-export function isValidBrowsingContext() {
+export function checkCookiesAuthorized() {
   if (!areCookiesAuthorized()) {
     console.error('Cookies are not authorized, we will not send any data.')
     return false
   }
-  if (isDocPrerendered() || isLocalFile()) {
+  return true
+}
+
+export function checkIsNotLocalFile() {
+  if (isLocalFile()) {
     console.error('Execution is not allowed in the current context.')
     return false
   }
@@ -56,9 +61,4 @@ export function isValidBrowsingContext() {
 
 function isLocalFile() {
   return window.location.protocol === 'file:'
-}
-
-function isDocPrerendered() {
-  // https://www.w3.org/TR/resource-hints/#dfn-prerender
-  return document.visibilityState === 'prerender'
 }

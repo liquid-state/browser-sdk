@@ -1,5 +1,6 @@
 const { exec } = require('child_process')
-let serverProcess
+let appProcess
+let intakeProcess
 
 module.exports = {
   runner: 'local',
@@ -16,17 +17,17 @@ module.exports = {
   },
   e2eMode: process.env.E2E_MODE || 'bundle',
   onPrepare: function() {
-    serverProcess = exec('node test/server/server')
+    appProcess = exec('PORT=3000 node test/server/server')
+    intakeProcess = exec('PORT=4000 node test/server/server')
   },
   before: function() {
     require('ts-node').register({
       files: true,
       project: 'test/e2e/scenario/tsconfig.json',
     })
-    // avoid reference error when executing ts files with window references
-    global.window = {}
   },
   onComplete: function() {
-    serverProcess.kill()
+    appProcess.kill()
+    intakeProcess.kill()
   },
 }

@@ -5,6 +5,7 @@ export const ONE_MINUTE = 60 * 1000
 export const ONE_KILO_BYTE = 1024
 
 export enum ResourceKind {
+  DOCUMENT = 'document',
   XHR = 'xhr',
   BEACON = 'beacon',
   FETCH = 'fetch',
@@ -150,8 +151,11 @@ export function jsonStringify(
     }
   }
 
+  let result: string
   try {
-    return JSON.stringify(value, replacer, space)
+    result = JSON.stringify(value, undefined, space)
+  } catch {
+    result = '<error: unable to serialize object>'
   } finally {
     if (originalToJSON[0]) {
       ;(value as ObjectWithToJSON).toJSON = originalToJSON[1]
@@ -160,14 +164,11 @@ export function jsonStringify(
       ;(prototype as ObjectWithToJSON).toJSON = originalProtoToJSON[1]
     }
   }
+  return result
 }
 
 function hasToJSON(value: unknown): value is ObjectWithToJSON {
   return typeof value === 'object' && value !== null && value.hasOwnProperty('toJSON')
-}
-
-export function startsWith(candidate: string, search: string) {
-  return candidate.indexOf(search) === 0
 }
 
 export function includes(candidate: unknown[], search: unknown) {
@@ -175,7 +176,11 @@ export function includes(candidate: unknown[], search: unknown) {
 }
 
 export function isPercentage(value: unknown) {
-  return typeof value === 'number' && value >= 0 && value <= 100
+  return isNumber(value) && value >= 0 && value <= 100
+}
+
+export function isNumber(value: unknown): value is number {
+  return typeof value === 'number'
 }
 
 /**
@@ -189,10 +194,19 @@ export function getRelativeTime(timestamp: number) {
   return timestamp - performance.timing.navigationStart
 }
 
+export function getTimestamp(relativeTime: number) {
+  return Math.floor(performance.timing.navigationStart + relativeTime)
+}
+
 export function objectValues(object: { [key: string]: unknown }) {
   const values: unknown[] = []
   Object.keys(object).forEach((key) => {
     values.push(object[key])
   })
   return values
+}
+
+export function getGlobalObject<T>(): T {
+  // tslint:disable-next-line: function-constructor no-function-constructor-with-string-args
+  return (typeof globalThis === 'object' ? globalThis : Function('return this')()) as T
 }

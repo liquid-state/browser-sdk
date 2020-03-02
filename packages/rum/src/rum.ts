@@ -5,11 +5,14 @@ import {
   ContextValue,
   ErrorContext,
   ErrorMessage,
+  getTimestamp,
   HttpContext,
   HttpRequest,
   includes,
+  InternalMonitoring,
   monitor,
   msToNs,
+  Omit,
   RequestDetails,
   RequestType,
   ResourceKind,
@@ -124,9 +127,23 @@ export function startRum(
   applicationId: string,
   lifeCycle: LifeCycle,
   configuration: Configuration,
-  session: RumSession
+  session: RumSession,
+  internalMonitoring: InternalMonitoring
 ): Omit<RumGlobal, 'init'> {
   let globalContext: Context = {}
+
+  internalMonitoring.setExternalContextProvider(() =>
+    lodashMerge(
+      {
+        application_id: applicationId,
+        session_id: viewContext.sessionId,
+        view: {
+          id: viewContext.id,
+        },
+      },
+      globalContext
+    )
+  )
 
   const batch = startRumBatch(
     configuration,
@@ -179,7 +196,7 @@ function startRumBatch(
   globalContextProvider: () => Context
 ) {
   const batch = new Batch<Context>(
-    new HttpRequest(configuration.rumEndpoint, configuration.batchBytesLimit),
+    new HttpRequest(configuration.rumEndpoint, configuration.batchBytesLimit, configuration.enableExperimentalFeatures),
     configuration.maxBatchSize,
     configuration.batchBytesLimit,
     configuration.maxMessageSize,
@@ -207,9 +224,10 @@ function startRumBatch(
 }
 
 function trackErrors(lifeCycle: LifeCycle, addRumEvent: (event: RumEvent) => void) {
-  lifeCycle.subscribe(LifeCycleEventType.ERROR_COLLECTED, ({ message, context }: ErrorMessage) => {
+  lifeCycle.subscribe(LifeCycleEventType.ERROR_COLLECTED, ({ message, startTime, context }: ErrorMessage) => {
     addRumEvent({
       message,
+      date: getTimestamp(startTime),
       evt: {
         category: RumEventCategory.ERROR,
       },
@@ -246,6 +264,7 @@ export function trackRequests(
     const timing = matchRequestTiming(requestDetails)
     const kind = requestDetails.type === RequestType.XHR ? ResourceKind.XHR : ResourceKind.FETCH
     addRumEvent({
+      date: getTimestamp(timing ? timing.startTime : requestDetails.startTime),
       duration: msToNs(timing ? timing.duration : requestDetails.duration),
       evt: {
         category: RumEventCategory.RESOURCE,
@@ -301,6 +320,7 @@ export function handleResourceEntry(
     return
   }
   addRumEvent({
+    date: getTimestamp(entry.startTime),
     duration: msToNs(entry.duration),
     evt: {
       category: RumEventCategory.RESOURCE,
@@ -321,6 +341,7 @@ export function handleResourceEntry(
 
 export function handleLongTaskEntry(entry: PerformanceLongTaskTiming, addRumEvent: (event: RumEvent) => void) {
   addRumEvent({
+    date: getTimestamp(entry.startTime),
     duration: msToNs(entry.duration),
     evt: {
       category: RumEventCategory.LONG_TASK,

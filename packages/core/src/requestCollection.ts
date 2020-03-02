@@ -72,7 +72,17 @@ export function trackXhr(observable: RequestObservable) {
       })
     }
 
-    this.addEventListener('loadend', monitor(reportXhr))
+    const originalOnreadystatechange = this.onreadystatechange
+
+    this.onreadystatechange = function() {
+      if (this.readyState === XMLHttpRequest.DONE) {
+        monitor(reportXhr)()
+      }
+
+      if (originalOnreadystatechange) {
+        originalOnreadystatechange.apply(this, arguments as any)
+      }
+    }
 
     return originalSend.apply(this, arguments as any)
   }
@@ -103,7 +113,12 @@ export function trackFetch(observable: RequestObservable) {
           type: RequestType.FETCH,
         })
       } else if ('status' in response) {
-        const text = await response.clone().text()
+        let text: string
+        try {
+          text = await response.clone().text()
+        } catch (e) {
+          text = `Unable to retrieve response: ${e}`
+        }
         observable.notify({
           duration,
           method,

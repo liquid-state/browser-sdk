@@ -13,6 +13,7 @@ import { computeStackTrace, Handler, report, StackFrame, StackTrace } from './tr
 import { jsonStringify, ONE_MINUTE } from './utils'
 
 export interface ErrorMessage {
+  startTime: number
   message: string
   context: {
     error: ErrorContext
@@ -41,16 +42,20 @@ export enum ErrorOrigin {
 }
 
 export type ErrorObservable = Observable<ErrorMessage>
+let filteredErrorsObservable: ErrorObservable
 
 export function startErrorCollection(configuration: Configuration) {
-  const errorObservable = new Observable<ErrorMessage>()
-  if (configuration.isCollectingError) {
-    const requestObservable = startRequestCollection()
-    trackNetworkError(configuration, errorObservable, requestObservable)
-    startConsoleTracking(errorObservable)
-    startRuntimeErrorTracking(errorObservable)
+  if (!filteredErrorsObservable) {
+    const errorObservable = new Observable<ErrorMessage>()
+    if (configuration.isCollectingError) {
+      const requestObservable = startRequestCollection()
+      trackNetworkError(configuration, errorObservable, requestObservable)
+      startConsoleTracking(errorObservable)
+      startRuntimeErrorTracking(errorObservable)
+    }
+    filteredErrorsObservable = filterErrors(configuration, errorObservable)
   }
-  return filterErrors(configuration, errorObservable)
+  return filteredErrorsObservable
 }
 
 export function filterErrors(configuration: Configuration, errorObservable: Observable<ErrorMessage>) {
@@ -69,6 +74,7 @@ export function filterErrors(configuration: Configuration, errorObservable: Obse
           },
         },
         message: `Reached max number of errors by minute: ${configuration.maxErrorsByMinute}`,
+        startTime: performance.now(),
       })
     }
   })
@@ -89,6 +95,7 @@ export function startConsoleTracking(errorObservable: ErrorObservable) {
         },
       },
       message: ['console error:', message, ...optionalParams].map(formatConsoleParameters).join(' '),
+      startTime: performance.now(),
     })
   })
 }
@@ -139,6 +146,7 @@ export function formatRuntimeError(stackTrace: StackTrace, errorObject: any) {
         origin: ErrorOrigin.SOURCE,
       },
     },
+    startTime: performance.now(),
   }
 }
 
@@ -174,6 +182,7 @@ export function trackNetworkError(
           },
         },
         message: `${format(request.type)} error ${request.method} ${request.url}`,
+        startTime: request.startTime,
       })
     }
   })

@@ -6,7 +6,9 @@ import {
   ErrorMessage,
   ErrorObservable,
   ErrorOrigin,
+  getTimestamp,
   HttpRequest,
+  InternalMonitoring,
   monitored,
   noop,
 } from '@datadog/browser-core'
@@ -51,8 +53,18 @@ export enum HandlerType {
 
 type Handlers = { [key in HandlerType]: (message: LogsMessage) => void }
 
-export function startLogger(errorObservable: ErrorObservable, configuration: Configuration, session: LoggerSession) {
+export function startLogger(
+  errorObservable: ErrorObservable,
+  configuration: Configuration,
+  session: LoggerSession,
+  internalMonitoring: InternalMonitoring
+) {
   let globalContext: Context = {}
+
+  internalMonitoring.setExternalContextProvider(() =>
+    lodashMerge({ session_id: session.getId() }, globalContext, getRUMInternalContext())
+  )
+
   const batch = new Batch<LogsMessage>(
     new HttpRequest(configuration.logsEndpoint, configuration.batchBytesLimit),
     configuration.maxBatchSize,
@@ -80,7 +92,9 @@ export function startLogger(errorObservable: ErrorObservable, configuration: Con
   }
   const logger = new Logger(session, handlers)
   customLoggers = {}
-  errorObservable.subscribe((e: ErrorMessage) => logger.error(e.message, e.context))
+  errorObservable.subscribe((e: ErrorMessage) =>
+    logger.error(e.message, { date: getTimestamp(e.startTime), ...e.context })
+  )
 
   const globalApi: Partial<LogsGlobal> = {}
   globalApi.setLoggerGlobalContext = (context: Context) => {

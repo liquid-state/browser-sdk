@@ -1,4 +1,4 @@
-import { addMonitoringMessage, generateUUID, monitor, msToNs, throttle } from '@datadog/browser-core'
+import { generateUUID, getTimestamp, monitor, msToNs, throttle } from '@datadog/browser-core'
 
 import { LifeCycle, LifeCycleEventType } from './lifeCycle'
 import { PerformancePaintTiming, RumEvent, RumEventCategory } from './rum'
@@ -25,7 +25,6 @@ interface ViewContext {
 export let viewContext: ViewContext
 
 const THROTTLE_VIEW_UPDATE_PERIOD = 3000
-let startTimestamp: number
 let startOrigin: number
 let documentVersion: number
 let viewMeasures: ViewMeasures
@@ -50,13 +49,12 @@ export function trackView(
 }
 
 function newView(location: Location, session: RumSession, upsertRumEvent: (event: RumEvent, key: string) => void) {
+  startOrigin = !viewContext ? 0 : performance.now()
   viewContext = {
     id: generateUUID(),
     location: { ...location },
     sessionId: session.getId(),
   }
-  startTimestamp = new Date().getTime()
-  startOrigin = performance.now()
   documentVersion = 1
   viewMeasures = {
     errorCount: 0,
@@ -75,7 +73,7 @@ function updateView(upsertRumEvent: (event: RumEvent, key: string) => void) {
 function upsertViewEvent(upsertRumEvent: (event: RumEvent, key: string) => void) {
   upsertRumEvent(
     {
-      date: startTimestamp,
+      date: getTimestamp(startOrigin),
       duration: msToNs(performance.now() - startOrigin),
       evt: {
         category: RumEventCategory.VIEW,
@@ -118,25 +116,10 @@ function areDifferentViews(previous: Location, current: Location) {
   return previous.pathname !== current.pathname
 }
 
-function reportAbnormalLoadEvent(navigationEntry: PerformanceNavigationTiming) {
-  if (navigationEntry.loadEventEnd > 86400e3 /* one day in ms */) {
-    addMonitoringMessage(
-      `Got an abnormal load event in a PerformanceNavigationTiming entry!
-Session Id: ${viewContext.sessionId}
-View Id: ${viewContext.id}
-View start date: ${startTimestamp}
-Document Version: ${documentVersion}
-Entry: ${JSON.stringify(navigationEntry)}
-Previous measures: ${JSON.stringify(viewMeasures)}`
-    )
-  }
-}
-
 function trackMeasures(lifeCycle: LifeCycle, scheduleViewUpdate: () => void) {
   lifeCycle.subscribe(LifeCycleEventType.PERFORMANCE_ENTRY_COLLECTED, (entry) => {
     if (entry.entryType === 'navigation') {
       const navigationEntry = entry as PerformanceNavigationTiming
-      reportAbnormalLoadEvent(navigationEntry)
       viewMeasures = {
         ...viewMeasures,
         domComplete: msToNs(navigationEntry.domComplete),

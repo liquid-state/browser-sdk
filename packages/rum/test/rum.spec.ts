@@ -2,9 +2,12 @@ import {
   Configuration,
   DEFAULT_CONFIGURATION,
   ErrorMessage,
+  InternalMonitoring,
   isIE,
+  Omit,
   PerformanceObserverStubBuilder,
   RequestDetails,
+  SPEC_ENDPOINTS,
 } from '@datadog/browser-core'
 import sinon from 'sinon'
 
@@ -27,11 +30,12 @@ function getServerRequestBodies<T>(server: sinon.SinonFakeServer) {
 
 const configuration = {
   ...DEFAULT_CONFIGURATION,
-  internalMonitoringEndpoint: 'monitoring',
-  logsEndpoint: 'logs',
+  ...SPEC_ENDPOINTS,
   maxBatchSize: 1,
-  rumEndpoint: 'rum',
-  traceEndpoint: 'trace',
+}
+
+const internalMonitoring: InternalMonitoring = {
+  setExternalContextProvider: () => undefined,
 }
 
 describe('rum handle performance entry', () => {
@@ -66,7 +70,7 @@ describe('rum handle performance entry', () => {
     },
     {
       description: 'type resource + valid request',
-      entry: { entryType: 'resource', name: 'valid' },
+      entry: { entryType: 'resource', name: 'https://resource.com/valid' },
       expectEntryToBeAdded: true,
     },
   ].forEach(
@@ -144,10 +148,16 @@ describe('rum handle performance entry', () => {
     const entry: Partial<PerformanceResourceTiming> = {
       connectEnd: 10,
       connectStart: 3,
+      domainLookupEnd: 3,
+      domainLookupStart: 3,
       entryType: 'resource',
       name: 'http://localhost/test',
+      redirectEnd: 0,
+      redirectStart: 0,
+      requestStart: 20,
       responseEnd: 100,
       responseStart: 25,
+      secureConnectionStart: 0,
     }
 
     handleResourceEntry(
@@ -157,8 +167,48 @@ describe('rum handle performance entry', () => {
       new LifeCycle()
     )
     const resourceEvent = getEntry(addRumEvent, 0) as RumResourceEvent
-    expect(resourceEvent.http.performance!.connect.duration).toEqual(7 * 1e6)
-    expect(resourceEvent.http.performance!.download.duration).toEqual(75 * 1e6)
+    expect(resourceEvent.http.performance!.connect!.duration).toEqual(7 * 1e6)
+    expect(resourceEvent.http.performance!.download!.duration).toEqual(75 * 1e6)
+  })
+
+  describe('ignore invalid performance entry', () => {
+    it('when it has a negative timing start', () => {
+      const entry: Partial<PerformanceResourceTiming> = {
+        connectEnd: 10,
+        connectStart: -3,
+        entryType: 'resource',
+        name: 'http://localhost/test',
+        responseEnd: 100,
+        responseStart: 25,
+      }
+
+      handleResourceEntry(
+        configuration as Configuration,
+        entry as PerformanceResourceTiming,
+        addRumEvent,
+        new LifeCycle()
+      )
+      const resourceEvent = getEntry(addRumEvent, 0) as RumResourceEvent
+      expect(resourceEvent.http.performance).toBe(undefined)
+    })
+
+    it('when it has timing start after its end', () => {
+      const entry: Partial<PerformanceResourceTiming> = {
+        entryType: 'resource',
+        name: 'http://localhost/test',
+        responseEnd: 25,
+        responseStart: 100,
+      }
+
+      handleResourceEntry(
+        configuration as Configuration,
+        entry as PerformanceResourceTiming,
+        addRumEvent,
+        new LifeCycle()
+      )
+      const resourceEvent = getEntry(addRumEvent, 0) as RumResourceEvent
+      expect(resourceEvent.http.performance).toBe(undefined)
+    })
   })
 })
 
@@ -194,7 +244,7 @@ describe('rum session', () => {
       isTrackedWithResource: () => true,
     }
     const lifeCycle = new LifeCycle()
-    startRum('appId', lifeCycle, configuration as Configuration, trackedWithResourcesSession)
+    startRum('appId', lifeCycle, configuration as Configuration, trackedWithResourcesSession, internalMonitoring)
     startPerformanceCollection(lifeCycle, trackedWithResourcesSession)
     server.requests = []
 
@@ -213,7 +263,7 @@ describe('rum session', () => {
       isTrackedWithResource: () => false,
     }
     const lifeCycle = new LifeCycle()
-    startRum('appId', lifeCycle, configuration as Configuration, trackedWithResourcesSession)
+    startRum('appId', lifeCycle, configuration as Configuration, trackedWithResourcesSession, internalMonitoring)
     startPerformanceCollection(lifeCycle, trackedWithResourcesSession)
     server.requests = []
 
@@ -232,7 +282,7 @@ describe('rum session', () => {
       isTrackedWithResource: () => false,
     }
     const lifeCycle = new LifeCycle()
-    startRum('appId', lifeCycle, configuration as Configuration, notTrackedSession)
+    startRum('appId', lifeCycle, configuration as Configuration, notTrackedSession, internalMonitoring)
     startPerformanceCollection(lifeCycle, notTrackedSession)
     server.requests = []
 
@@ -252,7 +302,7 @@ describe('rum session', () => {
       isTrackedWithResource: () => isTracked,
     }
     const lifeCycle = new LifeCycle()
-    startRum('appId', lifeCycle, configuration as Configuration, session)
+    startRum('appId', lifeCycle, configuration as Configuration, session, internalMonitoring)
     startPerformanceCollection(lifeCycle, session)
     server.requests = []
 
@@ -276,7 +326,7 @@ describe('rum session', () => {
       isTrackedWithResource: () => isTrackedWithResource,
     }
     const lifeCycle = new LifeCycle()
-    startRum('appId', lifeCycle, configuration as Configuration, session)
+    startRum('appId', lifeCycle, configuration as Configuration, session, internalMonitoring)
     startPerformanceCollection(lifeCycle, session)
     server.requests = []
 
@@ -301,7 +351,7 @@ describe('rum session', () => {
     }
     const lifeCycle = new LifeCycle()
     server.requests = []
-    startRum('appId', lifeCycle, configuration as Configuration, session)
+    startRum('appId', lifeCycle, configuration as Configuration, session, internalMonitoring)
 
     interface ExpectedRequestBody {
       evt: {
@@ -358,7 +408,7 @@ describe('rum init', () => {
       isTrackedWithResource: () => true,
     }
 
-    startRum('appId', new LifeCycle(), configuration as Configuration, session)
+    startRum('appId', new LifeCycle(), configuration as Configuration, session, internalMonitoring)
 
     expect(server.requests.length).toBeGreaterThan(0)
   })
@@ -383,7 +433,7 @@ describe('rum global context', () => {
     }
     server = sinon.fakeServer.create()
     lifeCycle = new LifeCycle()
-    RUM = startRum('appId', lifeCycle, configuration as Configuration, session) as RumApi
+    RUM = startRum('appId', lifeCycle, configuration as Configuration, session, internalMonitoring) as RumApi
     server.requests = []
   })
 
@@ -430,7 +480,7 @@ describe('rum user action', () => {
     }
     server = sinon.fakeServer.create()
     lifeCycle = new LifeCycle()
-    RUM = startRum('appId', lifeCycle, configuration as Configuration, session) as RumApi
+    RUM = startRum('appId', lifeCycle, configuration as Configuration, session, internalMonitoring) as RumApi
     server.requests = []
   })
 
